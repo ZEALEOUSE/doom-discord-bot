@@ -410,11 +410,11 @@ client.on('interactionCreate', async interaction => {
         } else if (interaction.customId === 'scout_create') {
             const modal = new ModalBuilder().setCustomId('scout_modal').setTitle('🎯 Scout Başvurusu');
             modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_name_age').setLabel('Ad-Soyad ve Yaşınız').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Samet 20')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_game_rank').setLabel('Oyun ve Rank').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Valorant Yücelik 2')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_role').setLabel('Rol / Mevki').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: IGL, Entry Fragger, Main AWP')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_links').setLabel('Profil / Tracker / Video Linkleri').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Varsa oynanış video veya tracker linkleri')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_motivation').setLabel('Neden DOOM SK?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Takımımıza neden katılmak istiyorsunuz?'))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_name_age').setLabel('Adınız Soyadınız ve Yaşınız').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Samet Karadağ - 20')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_branch_game_rank').setLabel('Branşınız, Oyun ve Rütbeniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: FPS - Valorant - Yücelik 2')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_role_hours').setLabel('Rolünüz ve Oynama Saatiniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: IGL - Günde 6 Saat')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_links').setLabel('Profil, Tracker ve Video Linkleri').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Varsa oynanış video veya tracker linkleri')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_motivation').setLabel('Neden TEAM DOOM SK?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Takımımıza neden katılmak istiyorsunuz?'))
             );
             await interaction.showModal(modal);
         }
@@ -423,13 +423,22 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isModalSubmit() && interaction.customId === 'scout_modal') {
         const nameAge = interaction.fields.getTextInputValue('scout_name_age');
-        const gameRank = interaction.fields.getTextInputValue('scout_game_rank');
-        const role = interaction.fields.getTextInputValue('scout_role');
+        const branchGameRank = interaction.fields.getTextInputValue('scout_branch_game_rank');
+        const roleHours = interaction.fields.getTextInputValue('scout_role_hours');
         const links = interaction.fields.getTextInputValue('scout_links') || '';
         const motivation = interaction.fields.getTextInputValue('scout_motivation');
         
         const ageMatch = nameAge.match(/\d+/);
         const age = ageMatch ? parseInt(ageMatch[0]) : 0;
+        
+        // Parsing details from combined inputs
+        const gameDataParts = branchGameRank.split('-').map(s => s.trim());
+        const parsedGame = gameDataParts.length > 1 ? gameDataParts[1] : gameDataParts[0];
+        const parsedRank = gameDataParts.length > 2 ? gameDataParts[2] : (gameDataParts.length > 1 ? gameDataParts[1] : 'Belirtilmedi');
+
+        const roleDataParts = roleHours.split('-').map(s => s.trim());
+        const parsedRole = roleDataParts[0];
+        const parsedHours = roleDataParts.length > 1 ? roleDataParts[1] : '';
 
         const payload = {
             name: nameAge,
@@ -437,12 +446,13 @@ client.on('interactionCreate', async interaction => {
             age: age,
             discord: interaction.user.id,
             email: 'discord_basvuru',
-            game: gameRank.split(' ')[0] || 'Belirtilmedi',
-            rank: gameRank,
-            role: role,
+            game: parsedGame || 'Belirtilmedi',
+            rank: parsedRank || 'Belirtilmedi',
+            role: parsedRole || 'Belirtilmedi',
+            hours: parsedHours,
             profile_link: links,
             motivation: motivation,
-            notes: 'Discord Bot üzerinden hızlı başvuru yapıldı.'
+            notes: `Branş: ${gameDataParts[0] || '?'} | Discord'dan Başvuru`
         };
 
         try {
