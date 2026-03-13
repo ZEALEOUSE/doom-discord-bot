@@ -384,7 +384,68 @@ async function executeCommand(cmdName, ctx) {
 
             const logEmbed = new EmbedBuilder().setColor('#2ecc71').setTitle('🛡️ Master Yetki Reset Tamamlandı').setDescription(log.slice(0, 4000));
             await ctx.editReply({ embeds: [logEmbed] });
-            sendLog(guild, { color: '#2ecc71', title: '🛡️ Master Role Reset', desc: `${user.tag} tarafından tüm rol yetkileri sıfırlanıp düzeltildi.` });
+
+            // ── BÖLÜM 2: KANAL YETKİ SENKRONİZASYONU ───────────────────────────
+            let chLog = '📂 **KANAL YETKİ SENKRONİZASYONU**\n\n';
+            const allChannels = await guild.channels.fetch();
+            
+            const staffCategoryKeywords = ['yönetim', 'staff', 'admin', 'koordinatör', 'yetkili', 'denetim', 'log'];
+            const branchKeywords = ['fps', 'moba', 'rts', 'battle royale'];
+
+            for (const [id, channel] of allChannels) {
+                if (!channel) continue;
+
+                const name = channel.name.toLowerCase();
+                const parentName = channel.parent ? channel.parent.name.toLowerCase() : '';
+
+                // GÜVENLİ BÖLGE: Loglar, Ticketlar ve 🔒 ile başlayanlar asla ellenmez
+                if (
+                    name.includes('log') || 
+                    name.includes('denetim') || 
+                    name.includes('ticket') || 
+                    name.startsWith('🔒') ||
+                    parentName.includes('log') ||
+                    parentName.includes('denetim')
+                ) {
+                    chLog += `⏭️ **${channel.name}** -> Atlandı (Güvenli Bölge)\n`;
+                    continue;
+                }
+
+                try {
+                    // Yönetim/Staff Kategorisi veya Kanalı mı?
+                    const isStaff = staffCategoryKeywords.some(k => name.includes(k) || parentName.includes(k));
+                    
+                    if (isStaff) {
+                        // YÖNETİM KANALI: @everyone kapat, Owner/Coord aç
+                        const coordRole = allRoles.find(r => r.name.toLowerCase().includes('genel koordinatör'));
+                        const ownerRole = allRoles.find(r => r.name.toLowerCase().includes('owner'));
+
+                        await channel.permissionOverwrites.set([
+                            { id: guild.id, deny: [p.ViewChannel] }, // everyone close
+                            { id: ownerId, allow: [p.ViewChannel, p.SendMessages, p.ReadMessageHistory] }
+                        ]);
+                        
+                        if (coordRole) await channel.permissionOverwrites.edit(coordRole, { ViewChannel: true, SendMessages: true });
+                        if (ownerRole) await channel.permissionOverwrites.edit(ownerRole, { ViewChannel: true, SendMessages: true });
+                        
+                        chLog += `🔒 **${channel.name}** -> Yönetime özel (Gizlendi)\n`;
+                    } else {
+                        // GENEL KANAL: Gereksiz override'ları temizle, @everyone'a izin ver
+                        // Önce tüm override'ları sıfırla ki rol yetkileri (Part 1'de yaptıklarımız) geçerli olsun
+                        await channel.permissionOverwrites.set([
+                            { id: guild.id, allow: [p.ViewChannel] } // everyone can see
+                        ]);
+                        chLog += `🌍 **${channel.name}** -> Genel erişim (Temizlendi)\n`;
+                    }
+                } catch (err) {
+                    chLog += `❌ **${channel.name}** -> Hata: ${err.message}\n`;
+                }
+            }
+
+            const chLogEmbed = new EmbedBuilder().setColor('#3498db').setTitle('📂 Master Kanal Senkronizasyonu').setDescription(chLog.slice(0, 4000));
+            await ctx.channel.send({ embeds: [chLogEmbed] });
+
+            sendLog(guild, { color: '#2ecc71', title: '🛡️ Master System Sync', desc: `${user.tag} tarafından TÜM ROL VE KANAL YETKİLERİ sıfırlanıp düzeltildi.` });
         } catch(e) {
             await ctx.editReply(`❌ HATA: Bitmeyen bir işlem oluştu veya yetkim yetmedi: ${e.message}`);
         }
