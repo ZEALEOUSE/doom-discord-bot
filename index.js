@@ -591,6 +591,8 @@ client.on('guildMemberRemove', member => {
 });
 
 // ── WEB API ENDPOINTS ──────────────────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ status: 'OK', time: new Date().toISOString() }));
+
 app.post('/notify', async (req, res) => {
     const { type, data, channelId } = req.body;
     if (!channelId || !type) return res.status(400).json({ error: 'Eksik parametre' });
