@@ -809,10 +809,18 @@ client.once('ready', async () => {
         s = (s + 1) % statuses.length;
     }, 15000);
 
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(c => c.toJSON()) });
-        console.log('✅ Global Slash komutları kaydedildi.');
-    } catch (err) {}
+        if (process.env.GUILD_ID) {
+            await rest.put(Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID), { body: commands.map(c => c.toJSON()) });
+            console.log('✅ Guild Slash komutları kaydedildi.');
+        } else {
+            await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(c => c.toJSON()) });
+            console.log('✅ Global Slash komutları kaydedildi.');
+        }
+    } catch (err) {
+        console.error('❌ Slash komutları kaydedilirken hata oluştu:', err);
+    }
 
     // ── BOT STATUS HEARTBEAT ──────────────────────────────
     async function updateBotStatus(status) {
