@@ -617,13 +617,25 @@ app.post('/custom-message', async (req, res) => {
 
 app.post('/scout-status', async (req, res) => {
     const { discordId, status, adminNote } = req.body;
+    console.log(`[Webhook] Scout Status Update: User=${discordId} Status=${status}`);
+    
     try {
         const user = await client.users.fetch(discordId);
         if (user) {
             let color = '#f1c40f'; // İncelemede / Beklemede
             let desc = `Merhaba **${user.username}**, DOOM SK E-Spor Akademi (Scout) başvurunun durumu az önce güncellendi!\n\n**Yeni Durum:** \`${status}\``;
-            if (status === 'Onaylandı') color = '#2ecc71';
-            else if (status === 'Reddedildi') color = '#e74c3c';
+            
+            // Web sitesinden gelen değerlerle eşleştirme (Kabul, Ret, İnceleniyor)
+            if (status === 'Kabul' || status === 'Onaylandı') {
+                color = '#2ecc71';
+                desc = `🎉 **TEBRİKLER!** Scout başvurunuz **KABUL EDİLDİ!**\n\nEkibimiz en kısa sürede sizinle iletişime geçecektir. Hoş geldiniz!`;
+            } else if (status === 'Ret' || status === 'Reddedildi') {
+                color = '#e74c3c';
+                desc = `😔 **Üzgünüz...** Scout başvurunuz şu an için **OLUMSUZ** değerlendirildi.\n\nWep sitemize ve duyurularımıza göz atarak gelecekte tekrar şansınızı deneyebilirsiniz.`;
+            } else if (status === 'İnceleniyor') {
+                color = '#3498db';
+                desc = `🔍 **BİLGİ:** Scout başvurunuz şu an **İNCELEMEYE ALINDI.**\n\nLütfen beklemede kalın, yakında sonuçlanacaktır.`;
+            }
             
             if (adminNote) desc += `\n\n**Yönetici Notu:**\n*${adminNote}*`;
             
@@ -633,10 +645,15 @@ app.post('/scout-status', async (req, res) => {
                 .setDescription(desc)
                 .setFooter({ text: 'DOOM SK Yönetimi' })
                 .setTimestamp();
-            await user.send({ embeds: [embed] }).catch(() => {});
+            
+            await user.send({ embeds: [embed] });
+            console.log(`[Success] DM sent to ${user.tag}`);
         }
         res.json({ success: true });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+    } catch(e) { 
+        console.error(`[Error] Scout Status Webhook: ${e.message}`);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.post('/mass-dm', async (req, res) => {
