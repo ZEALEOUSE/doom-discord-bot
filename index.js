@@ -66,6 +66,7 @@ const commands = [
         .addStringOption(opt => opt.setName('sebep').setDescription('Ban sebebi')),
     new SlashCommandBuilder().setName('oda_kur').setDescription('[Admin] Oto-Oda sistemini kurar'),
     new SlashCommandBuilder().setName('ozel_kanal_kur').setDescription('[Admin] Özel kanal (Text/Voice) oluşturma panelini kurar'),
+    new SlashCommandBuilder().setName('rol_yetki_reset').setDescription('[Owner] TÜM sunucu yetkilerini profesyonel şablona göre sıfırlayıp düzeltir'),
     
     // Rol Yönetimi
     new SlashCommandBuilder().setName('autorol_ayarla').setDescription('[Admin] Sunucuya yeni girenlere verilecek rolü ayarlar')
@@ -343,6 +344,50 @@ async function executeCommand(cmdName, ctx) {
             }
             await ctx.editReply(`✅ **İşlem Tamamlandı:** Toplam **${count}** kişiden <@&${role.id}> rolü alındı.`);
         } catch(e) { await ctx.editReply(`Hata: ${e.message}`); }
+    }
+    // ROL YETKİ RESET (MASTER SYSTEM)
+    else if (cmdName === 'rol_yetki_reset') {
+        if (user.id !== guild.ownerId) return ctx.reply({ content: 'Bu kritik komutu sadece **Sunucu Sahibi** kullanabilir!' });
+        
+        await ctx.deferReply();
+        try {
+            const allRoles = await guild.roles.fetch();
+            let log = '🔄 **YETKİ RESETLEME RAPORU**\n\n';
+            
+            // Perm Templates
+            const p = PermissionsBitField.Flags;
+            const t = {
+                admin: [p.Administrator],
+                coord: [p.ManageGuild, p.ManageRoles, p.ManageChannels, p.KickMembers, p.BanMembers, p.ManageMessages, p.ViewAuditLog, p.ModerateMembers, p.ManageNicknames, p.MoveMembers, p.MuteMembers, p.DeafenMembers, p.CreateInstantInvite, p.ViewChannel, p.SendMessages, p.EmbedLinks, p.AttachFiles, p.Connect, p.Speak, p.UseApplicationCommands],
+                mod: [p.KickMembers, p.ManageMessages, p.ViewAuditLog, p.ModerateMembers, p.ManageNicknames, p.ViewChannel, p.SendMessages, p.EmbedLinks, p.AttachFiles, p.Connect, p.Speak, p.UseApplicationCommands],
+                staff: [p.ManageMessages, p.MoveMembers, p.MuteMembers, p.PrioritySpeaker, p.ViewChannel, p.SendMessages, p.Connect, p.Speak, p.UseApplicationCommands],
+                member: [p.ViewChannel, p.SendMessages, p.CreateInstantInvite, p.ChangeNickname, p.UseApplicationCommands, p.Connect, p.Speak, p.ReadMessageHistory, p.AddReactions, p.UseExternalEmojis]
+            };
+
+            for (const [id, role] of allRoles) {
+                if (role.managed || role.id === guild.id) continue; // Skip bot roles and @everyone
+
+                let newPerms = t.member; // Default
+                const name = role.name.toLowerCase();
+
+                if (name === '+') newPerms = t.admin;
+                else if (name.includes('owner') || name.includes('genel koordinatör')) newPerms = t.coord;
+                else if (name.includes('moderatör')) newPerms = t.mod;
+                else if (name.includes('koordinatörü') || name.includes('menajer')) newPerms = t.staff;
+                else if (name.includes('koç') || name.includes('analist')) newPerms = [p.ViewAuditLog, p.PrioritySpeaker, p.MoveMembers, ...t.member];
+                else if (name.includes('oyuncu') || name.includes('team doom') || name.includes('üye') || name.includes('booster') || ['fps','moba','rts','battle royale'].some(x => name.includes(x))) newPerms = t.member;
+
+                // Sync permissions
+                await role.setPermissions(newPerms);
+                log += `✅ **${role.name}** -> Yetkiler senkronize edildi.\n`;
+            }
+
+            const logEmbed = new EmbedBuilder().setColor('#2ecc71').setTitle('🛡️ Master Yetki Reset Tamamlandı').setDescription(log.slice(0, 4000));
+            await ctx.editReply({ embeds: [logEmbed] });
+            sendLog(guild, { color: '#2ecc71', title: '🛡️ Master Role Reset', desc: `${user.tag} tarafından tüm rol yetkileri sıfırlanıp düzeltildi.` });
+        } catch(e) {
+            await ctx.editReply(`❌ HATA: Bitmeyen bir işlem oluştu veya yetkim yetmedi: ${e.message}`);
+        }
     }
     // API ENTEGRASYONLU SİTE KOMUTLARI
     else if (cmdName === 'kadro') {
