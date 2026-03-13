@@ -390,7 +390,9 @@ async function executeCommand(cmdName, ctx) {
             const allChannels = await guild.channels.fetch();
             
             const staffCategoryKeywords = ['yönetim', 'staff', 'admin', 'koordinatör', 'yetkili', 'denetim', 'log'];
-            const branchKeywords = ['fps', 'moba', 'rts', 'battle royale'];
+            const infoKeywords = ['kurallar', 'haberler', 'duyurular', 'çekiliş', 'bilgi', 'alım', 'başvuru'];
+            const teamRole = allRoles.find(r => r.name.toLowerCase().includes('team doom sk'));
+            const adminRole = allRoles.find(r => r.name === '+');
 
             for (const [id, channel] of allChannels) {
                 if (!channel) continue;
@@ -412,30 +414,61 @@ async function executeCommand(cmdName, ctx) {
                 }
 
                 try {
-                    // Yönetim/Staff Kategorisi veya Kanalı mı?
-                    const isStaff = staffCategoryKeywords.some(k => name.includes(k) || parentName.includes(k));
-                    
-                    if (isStaff) {
-                        // YÖNETİM KANALI: @everyone kapat, Owner/Coord aç
-                        const coordRole = allRoles.find(r => r.name.toLowerCase().includes('genel koordinatör'));
-                        const ownerRole = allRoles.find(r => r.name.toLowerCase().includes('owner'));
-
+                    // 1. AYIRICI ÇİZGİLER (Herkes görür ama giremez, sadece + girebilir)
+                    if (name.includes('----------')) {
                         await channel.permissionOverwrites.set([
-                            { id: guild.id, deny: [p.ViewChannel] }, // everyone close
+                            { id: guild.id, allow: [p.ViewChannel], deny: [p.Connect] }
+                        ]);
+                        if (adminRole) await channel.permissionOverwrites.edit(adminRole, { ViewChannel: true, Connect: true });
+                        chLog += `➖ **${channel.name}** -> Kilitli Ayırıcı (Görünür, Giriş Kapalı)\n`;
+                        continue;
+                    }
+
+                    // 2. DUYURU / BİLGİ KANALLARI (Sadece Oku)
+                    if (infoKeywords.some(k => name.includes(k))) {
+                        await channel.permissionOverwrites.set([
+                            { id: guild.id, allow: [p.ViewChannel], deny: [p.SendMessages] }
+                        ]);
+                        const coordRole = allRoles.find(r => r.name.toLowerCase().includes('genel koordinatör'));
+                        if (coordRole) await channel.permissionOverwrites.edit(coordRole, { SendMessages: true });
+                        await channel.permissionOverwrites.edit(ownerId, { SendMessages: true });
+                        
+                        chLog += `📢 **${channel.name}** -> Salt Okunur (Duyuru)\n`;
+                        continue;
+                    }
+
+                    // 3. TURNUVA / TEAM DOOM SK ÖZEL (Sadece Takım ve Üst Yönetim)
+                    if (name.includes('turnuva') || name.includes('team doom sk')) {
+                        await channel.permissionOverwrites.set([
+                            { id: guild.id, deny: [p.ViewChannel] }
+                        ]);
+                        if (teamRole) await channel.permissionOverwrites.edit(teamRole, { ViewChannel: true, Connect: true, Speak: true });
+                        
+                        const coordRole = allRoles.find(r => r.name.toLowerCase().includes('genel koordinatör'));
+                        if (coordRole) await channel.permissionOverwrites.edit(coordRole, { ViewChannel: true });
+                        await channel.permissionOverwrites.edit(ownerId, { ViewChannel: true });
+
+                        chLog += `🏆 **${channel.name}** -> Takıma Özel (Gizli)\n`;
+                        continue;
+                    }
+
+                    // 4. YÖNETİM / STAFF KANALLARI
+                    const isStaff = staffCategoryKeywords.some(k => name.includes(k) || parentName.includes(k));
+                    if (isStaff) {
+                        await channel.permissionOverwrites.set([
+                            { id: guild.id, deny: [p.ViewChannel] },
                             { id: ownerId, allow: [p.ViewChannel, p.SendMessages, p.ReadMessageHistory] }
                         ]);
-                        
+                        const coordRole = allRoles.find(r => r.name.toLowerCase().includes('genel koordinatör'));
                         if (coordRole) await channel.permissionOverwrites.edit(coordRole, { ViewChannel: true, SendMessages: true });
-                        if (ownerRole) await channel.permissionOverwrites.edit(ownerRole, { ViewChannel: true, SendMessages: true });
                         
-                        chLog += `🔒 **${channel.name}** -> Yönetime özel (Gizlendi)\n`;
+                        chLog += `🔒 **${channel.name}** -> Yönetime Özel\n`;
                     } else {
-                        // GENEL KANAL: Gereksiz override'ları temizle, @everyone'a izin ver
-                        // Önce tüm override'ları sıfırla ki rol yetkileri (Part 1'de yaptıklarımız) geçerli olsun
+                        // 5. GENEL KANALLAR
                         await channel.permissionOverwrites.set([
-                            { id: guild.id, allow: [p.ViewChannel] } // everyone can see
+                            { id: guild.id, allow: [p.ViewChannel] }
                         ]);
-                        chLog += `🌍 **${channel.name}** -> Genel erişim (Temizlendi)\n`;
+                        chLog += `🌍 **${channel.name}** -> Genel Erişim\n`;
                     }
                 } catch (err) {
                     chLog += `❌ **${channel.name}** -> Hata: ${err.message}\n`;
