@@ -91,6 +91,7 @@ const commands = [
         .addStringOption(opt => opt.setName('thumbnail').setDescription('Küçük küçük resim (Resim URL)').setRequired(false))
         .addStringOption(opt => opt.setName('footer').setDescription('Alt bilgi yazısı').setRequired(false))
         .addStringOption(opt => opt.setName('author').setDescription('Yazar ismi').setRequired(false))
+        .addAttachmentOption(opt => opt.setName('ek_gorsel').setDescription('Dosya olarak resim yükleyin').setRequired(false))
         .addStringOption(opt => opt.setName('ping').setDescription('Bildirim türü').addChoices(
             { name: 'None', value: 'none' },
             { name: 'Everyone', value: 'everyone' },
@@ -152,6 +153,10 @@ class CmdCtx {
             return this.guild.members.cache.get(id)?.user || null;
         }
         return null;
+    }
+    getAttachment(name) {
+        if (this.isSlash) return this.i.options.getAttachment(name);
+        return this.m.attachments.first() || null;
     }
 }
 
@@ -692,7 +697,8 @@ async function executeCommand(cmdName, ctx) {
         const thumbnail = ctx.getString('thumbnail', 4) || 'none';
         const footerText = ctx.getString('footer', 5) || 'TEAM DOOM SK | Resmi Duyuru';
         const authorName = ctx.getString('author', 6) || null;
-        const ping = ctx.getString('ping', 7) || (ctx.getString('ping', 4) === 'everyone' ? 'everyone' : 'none'); // Compatibility check
+        const ping = ctx.getString('ping', 7) || (ctx.getString('ping', 4) === 'everyone' ? 'everyone' : 'none'); 
+        const ekGorsel = ctx.getAttachment('ek_gorsel');
 
         // Eğer başlık ve mesaj zaten komutta verilmişse (Direct Slash veya Prefix)
         if (baslik && mesaj) {
@@ -719,7 +725,8 @@ async function executeCommand(cmdName, ctx) {
             if (thumbnail && thumbnail !== 'none') embed.setThumbnail(thumbnail);
             else if (!authorName) embed.setThumbnail(guild.iconURL());
 
-            if (gorsel && gorsel !== 'none') embed.setImage(gorsel);
+            if (ekGorsel) embed.setImage(ekGorsel.url);
+            else if (gorsel && gorsel !== 'none') embed.setImage(gorsel);
 
             let content = '';
             if (ping === 'everyone') content = '@everyone';
