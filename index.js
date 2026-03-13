@@ -83,12 +83,15 @@ const commands = [
     new SlashCommandBuilder().setName('fikstur').setDescription('Yaklaşan turnuva maçlarını listeler'),
     new SlashCommandBuilder().setName('profil').setDescription('Oyuncu profil kartını görüntüler')
         .addUserOption(opt => opt.setName('kullanici').setDescription('Profiline bakılacak kişi (Boş bırakırsan kendin)')),
-    new SlashCommandBuilder().setName('duyuru').setDescription('[Staff] Gelişmiş duyuru ve bildirim sistemi')
-        .addStringOption(opt => opt.setName('baslik').setDescription('Duyuru başlığı (Modalsız kullanım için)').setRequired(false))
-        .addStringOption(opt => opt.setName('mesaj').setDescription('Duyuru içeriği (Modalsız kullanım için)').setRequired(false))
+    new SlashCommandBuilder().setName('duyuru').setDescription('[Staff] Gelişmiş duyuru ve bildirim sistemi (Webhook Tarzı)')
+        .addStringOption(opt => opt.setName('baslik').setDescription('Duyuru başlığı').setRequired(false))
+        .addStringOption(opt => opt.setName('mesaj').setDescription('Duyuru içeriği').setRequired(false))
         .addStringOption(opt => opt.setName('renk').setDescription('Embed kenar rengi (Örn: #ff1a1a)').setRequired(false))
-        .addStringOption(opt => opt.setName('gorsel').setDescription('Duyuruya eklenecek görsel (Resim URL)').setRequired(false))
-        .addStringOption(opt => opt.setName('ping').setDescription('Bildirim türü (Everyone/Here)').addChoices(
+        .addStringOption(opt => opt.setName('gorsel').setDescription('Büyük görsel (Resim URL)').setRequired(false))
+        .addStringOption(opt => opt.setName('thumbnail').setDescription('Küçük küçük resim (Resim URL)').setRequired(false))
+        .addStringOption(opt => opt.setName('footer').setDescription('Alt bilgi yazısı').setRequired(false))
+        .addStringOption(opt => opt.setName('author').setDescription('Yazar ismi').setRequired(false))
+        .addStringOption(opt => opt.setName('ping').setDescription('Bildirim türü').addChoices(
             { name: 'None', value: 'none' },
             { name: 'Everyone', value: 'everyone' },
             { name: 'Here', value: 'here' }
@@ -686,7 +689,10 @@ async function executeCommand(cmdName, ctx) {
         }
         const renk = ctx.getString('renk', 2) || '#ff1a1a';
         const gorsel = ctx.getString('gorsel', 3) || 'none';
-        const ping = ctx.getString('ping', 4) || 'none';
+        const thumbnail = ctx.getString('thumbnail', 4) || 'none';
+        const footerText = ctx.getString('footer', 5) || 'TEAM DOOM SK | Resmi Duyuru';
+        const authorName = ctx.getString('author', 6) || null;
+        const ping = ctx.getString('ping', 7) || (ctx.getString('ping', 4) === 'everyone' ? 'everyone' : 'none'); // Compatibility check
 
         // Eğer başlık ve mesaj zaten komutta verilmişse (Direct Slash veya Prefix)
         if (baslik && mesaj) {
@@ -706,9 +712,12 @@ async function executeCommand(cmdName, ctx) {
                 .setTitle(`📢 ${baslik}`)
                 .setDescription(mesaj)
                 .setColor(renk.startsWith('#') ? renk : '#ff1a1a')
-                .setThumbnail(guild.iconURL())
                 .setTimestamp()
-                .setFooter({ text: 'TEAM DOOM SK | Resmi Duyuru', iconURL: guild.iconURL() });
+                .setFooter({ text: footerText, iconURL: guild.iconURL() });
+
+            if (authorName) embed.setAuthor({ name: authorName, iconURL: guild.iconURL() });
+            if (thumbnail && thumbnail !== 'none') embed.setThumbnail(thumbnail);
+            else if (!authorName) embed.setThumbnail(guild.iconURL());
 
             if (gorsel && gorsel !== 'none') embed.setImage(gorsel);
 
@@ -740,7 +749,8 @@ async function executeCommand(cmdName, ctx) {
             .setFooter({ text: 'TEAM DOOM SK | Staff Only' });
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('duyuru_panel_ac').setLabel('Duyuru Hazırla').setStyle(ButtonStyle.Success).setEmoji('📝')
+            new ButtonBuilder().setCustomId('duyuru_panel_ac').setLabel('Hızlı Duyuru').setStyle(ButtonStyle.Success).setEmoji('📝'),
+            new ButtonBuilder().setCustomId('duyuru_panel_advanced').setLabel('Gelişmiş Duyuru').setStyle(ButtonStyle.Primary).setEmoji('🚀')
         );
 
         await ctx.reply({ embeds: [embed], components: [row] });
@@ -888,6 +898,18 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
+        if (customId === 'duyuru_panel_advanced') {
+            const modal = new ModalBuilder().setCustomId('duyuru_modal_everyone_#ff1a1a_none').setTitle('🚀 Gelişmiş Duyuru (Everyone)');
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_baslik').setLabel('Duyuru Başlığı').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Duyuru Başlığı...')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_mesaj').setLabel('Duyuru İçeriği').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Zengin metin kullanabilirsiniz...')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_image').setLabel('Büyük Görsel URL').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('https://...')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_thumbnail').setLabel('Küçük Resim URL').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('https://...')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_footer').setLabel('Alt Bilgi (Footer)').setStyle(TextInputStyle.Short).setRequired(false).setValue('TEAM DOOM SK | Resmi Duyuru'))
+            );
+            return await interaction.showModal(modal);
+        }
+
         if (customId === 'ticket_create') {
             const modal = new ModalBuilder().setCustomId('ticket_modal').setTitle('🎫 Destek Talebi');
             modal.addComponents(
@@ -1028,36 +1050,41 @@ client.on('interactionCreate', async interaction => {
         const customId = interaction.customId;
 
         if (customId.startsWith('duyuru_modal_')) {
-            const [,,ping, color, image] = customId.split('_');
+            const [,,, color, imageOld] = customId.split('_'); // Ping is usually handled, we keep color from ID if possible
+            const ping = customId.split('_')[2];
+            
             const baslik = interaction.fields.getTextInputValue('duyuru_baslik');
             const mesaj = interaction.fields.getTextInputValue('duyuru_mesaj');
+            
+            // Advanced fields might or might not exist depending on which modal was used
+            let gorsel = imageOld !== 'none' ? imageOld : null;
+            let thumbnail = null;
+            let footerText = 'TEAM DOOM SK | Resmi Duyuru';
+
+            try { gorsel = interaction.fields.getTextInputValue('duyuru_image') || gorsel; } catch(e){}
+            try { thumbnail = interaction.fields.getTextInputValue('duyuru_thumbnail') || null; } catch(e){}
+            try { footerText = interaction.fields.getTextInputValue('duyuru_footer') || footerText; } catch(e){}
 
             let channel = null;
             try {
                 const configRes = await axios.get(`${SITE_API}?action=get_discord_config`);
                 const newsChannelId = configRes.data?.config?.news_channel;
-                if (newsChannelId) {
-                    channel = await interaction.guild.channels.fetch(newsChannelId).catch(() => null);
-                }
-            } catch (e) {
-                console.error('Config fetch error:', e.message);
-            }
+                if (newsChannelId) channel = await interaction.guild.channels.fetch(newsChannelId).catch(() => null);
+            } catch (e) {}
 
-            if (!channel) {
-                channel = interaction.guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
-            }
-
+            if (!channel) channel = interaction.guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
             if (!channel) return interaction.reply({ content: '❌ Duyuru kanalı bulunamadı.', ephemeral: true });
 
             const embed = new EmbedBuilder()
                 .setTitle(`📢 ${baslik}`)
                 .setDescription(mesaj)
-                .setColor(color.startsWith('#') ? color : '#ff1a1a')
-                .setThumbnail(interaction.guild.iconURL())
+                .setColor(color && color.startsWith('#') ? color : '#ff1a1a')
                 .setTimestamp()
-                .setFooter({ text: 'TEAM DOOM SK | Resmi Duyuru', iconURL: interaction.guild.iconURL() });
+                .setFooter({ text: footerText, iconURL: interaction.guild.iconURL() });
 
-            if (image && image !== 'none') embed.setImage(image);
+            if (gorsel && gorsel !== 'none') embed.setImage(gorsel);
+            if (thumbnail && thumbnail !== 'none') embed.setThumbnail(thumbnail);
+            else embed.setThumbnail(interaction.guild.iconURL());
 
             let content = '';
             if (ping === 'everyone') content = '@everyone';
