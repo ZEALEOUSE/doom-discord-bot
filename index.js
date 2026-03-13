@@ -84,6 +84,8 @@ const commands = [
     new SlashCommandBuilder().setName('profil').setDescription('Oyuncu profil kartını görüntüler')
         .addUserOption(opt => opt.setName('kullanici').setDescription('Profiline bakılacak kişi (Boş bırakırsan kendin)')),
     new SlashCommandBuilder().setName('duyuru').setDescription('[Staff] Gelişmiş duyuru ve bildirim sistemi')
+        .addStringOption(opt => opt.setName('baslik').setDescription('Duyuru başlığı (Modalsız kullanım için)').setRequired(false))
+        .addStringOption(opt => opt.setName('mesaj').setDescription('Duyuru içeriği (Modalsız kullanım için)').setRequired(false))
         .addStringOption(opt => opt.setName('renk').setDescription('Embed kenar rengi (Örn: #ff1a1a)').setRequired(false))
         .addStringOption(opt => opt.setName('gorsel').setDescription('Duyuruya eklenecek görsel (Resim URL)').setRequired(false))
         .addStringOption(opt => opt.setName('ping').setDescription('Bildirim türü (Everyone/Here)').addChoices(
@@ -100,7 +102,8 @@ const commands = [
     new SlashCommandBuilder().setName('rol_herkese_ver').setDescription('[Admin] Sunucudaki TÜM ÜYELERE bir rol ekler')
         .addRoleOption(opt => opt.setName('rol').setDescription('Eklenecek rol').setRequired(true)),
     new SlashCommandBuilder().setName('rol_herkesten_al').setDescription('[Admin] Sunucudaki TÜM ÜYELERDEN bir rolü kaldırır')
-        .addRoleOption(opt => opt.setName('rol').setDescription('Kaldırılacak rol').setRequired(true))
+        .addRoleOption(opt => opt.setName('rol').setDescription('Kaldırılacak rol').setRequired(true)),
+    new SlashCommandBuilder().setName('duyuru_kur').setDescription('[Admin] Kalıcı bir duyuru hazırlama paneli oluşturur (Her zaman Everyone atar)')
 ];
 
 // ── ORTAK KOMUT MİMARİSİ (PREFIX + SLASH) ──────────────────────────────
@@ -671,18 +674,76 @@ async function executeCommand(cmdName, ctx) {
     }
     else if (cmdName === 'duyuru') {
         if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return ctx.reply({ content: 'Yetkin yok!' });
-        if (!ctx.isSlash) return ctx.reply({ content: 'Bu komut sadece Slash (/) olarak kullanılabilir.' });
 
-        const ping = ctx.getString('ping', 0) || 'none';
-        const renk = ctx.getString('renk', 1) || '#ff1a1a';
-        const gorsel = ctx.getString('gorsel', 2) || 'none';
+        let baslik = ctx.getString('baslik', 0);
+        let mesaj = ctx.getString('mesaj', 1, true);
+
+        // Prefix Güzelleştirmesi: Eğer tek bir mesaj Bloğu varsa("|" ile ayırabilir)
+        if (!ctx.isSlash && mesaj && mesaj.includes('|')) {
+            const parts = mesaj.split('|').map(p => p.trim());
+            baslik = parts[0];
+            mesaj = parts[1];
+        }
+        const renk = ctx.getString('renk', 2) || '#ff1a1a';
+        const gorsel = ctx.getString('gorsel', 3) || 'none';
+        const ping = ctx.getString('ping', 4) || 'none';
+
+        // Eğer başlık ve mesaj zaten komutta verilmişse (Direct Slash veya Prefix)
+        if (baslik && mesaj) {
+            await ctx.deferReply({ ephemeral: true });
+            
+            let channel = null;
+            try {
+                const configRes = await axios.get(`${SITE_API}?action=get_discord_config`);
+                const newsChannelId = configRes.data?.config?.news_channel;
+                if (newsChannelId) channel = await guild.channels.fetch(newsChannelId).catch(() => null);
+            } catch (e) {}
+
+            if (!channel) channel = guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
+            if (!channel) return ctx.editReply({ content: '❌ Duyuru kanalı bulunamadı.' });
+
+            const embed = new EmbedBuilder()
+                .setTitle(`📢 ${baslik}`)
+                .setDescription(mesaj)
+                .setColor(renk.startsWith('#') ? renk : '#ff1a1a')
+                .setThumbnail(guild.iconURL())
+                .setTimestamp()
+                .setFooter({ text: 'TEAM DOOM SK | Resmi Duyuru', iconURL: guild.iconURL() });
+
+            if (gorsel && gorsel !== 'none') embed.setImage(gorsel);
+
+            let content = '';
+            if (ping === 'everyone') content = '@everyone';
+            else if (ping === 'here') content = '@here';
+
+            await channel.send({ content, embeds: [embed] });
+            return ctx.editReply({ content: `✅ Duyuru başarıyla gönderildi: ${channel}` });
+        }
+
+        // Başlık/Mesaj yoksa MODAL aç (Sadece Slash için geçerli)
+        if (!ctx.isSlash) return ctx.reply({ content: '❌ Başlık ve mesaj belirtmelisin! (Örn: `doomduyuru Başlık | Mesaj`)' });
 
         const modal = new ModalBuilder().setCustomId(`duyuru_modal_${ping}_${renk}_${gorsel}`).setTitle('📢 Duyuru Hazırla');
         modal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_baslik').setLabel('Duyuru Başlığı').setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_mesaj').setLabel('Duyuru İçeriği').setStyle(TextInputStyle.Paragraph).setRequired(true))
         );
-        await interaction.showModal(modal);
+        await ctx.i.showModal(modal);
+    }
+    else if (cmdName === 'duyuru_kur') {
+        if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) return ctx.reply({ content: 'Yetkin yok!' });
+        
+        const embed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle('📢 Duyuru Yönetim Paneli')
+            .setDescription('Aşağıdaki butonu kullanarak hızlıca yeni bir duyuru hazırlayabilirsiniz.\n\n**Not:** Bu panel üzerinden yapılan tüm duyurular otomatik olarak `@everyone` etiketiyle paylaşılır.')
+            .setFooter({ text: 'TEAM DOOM SK | Staff Only' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('duyuru_panel_ac').setLabel('Duyuru Hazırla').setStyle(ButtonStyle.Success).setEmoji('📝')
+        );
+
+        await ctx.reply({ embeds: [embed], components: [row] });
     }
 
 }
@@ -808,7 +869,18 @@ client.on('messageCreate', async message => {
 client.on('interactionCreate', async interaction => {
     // Menüler & Modallar & Butonlar
     if (interaction.isButton()) {
-        if (interaction.customId === 'ticket_create') {
+        const customId = interaction.customId;
+
+        if (customId === 'duyuru_panel_ac') {
+            const modal = new ModalBuilder().setCustomId('duyuru_modal_everyone_#ff1a1a_none').setTitle('📢 Hızlı Duyuru (Everyone)');
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_baslik').setLabel('Duyuru Başlığı').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_mesaj').setLabel('Duyuru İçeriği').setStyle(TextInputStyle.Paragraph).setRequired(true))
+            );
+            return await interaction.showModal(modal);
+        }
+
+        if (customId === 'ticket_create') {
             const modal = new ModalBuilder().setCustomId('ticket_modal').setTitle('🎫 Destek Talebi');
             modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_subject').setLabel('Konu').setStyle(TextInputStyle.Short).setRequired(true)),
