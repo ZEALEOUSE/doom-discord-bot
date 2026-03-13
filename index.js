@@ -68,6 +68,30 @@ const commands = [
     new SlashCommandBuilder().setName('ozel_kanal_kur').setDescription('[Admin] Özel kanal (Text/Voice) oluşturma panelini kurar'),
     new SlashCommandBuilder().setName('rol_yetki_reset').setDescription('[Owner] TÜM sunucu yetkilerini profesyonel şablona göre sıfırlayıp düzeltir'),
     
+    // Gelişmiş Özellikler
+    new SlashCommandBuilder().setName('turnuva_skor_gir').setDescription('[Staff] Bir maçın skorunu ve istatistiklerini günceller')
+        .addStringOption(opt => opt.setName('mac_id').setDescription('Maç ID (Siteden alabilirsiniz)').setRequired(true))
+        .addIntegerOption(opt => opt.setName('skor_biz').setDescription('Bizim skor (TEAM DOOM)').setRequired(true))
+        .addIntegerOption(opt => opt.setName('skor_rakip').setDescription('Rakip skor').setRequired(true))
+        .addStringOption(opt => opt.setName('durum').setDescription('Maç durumu').addChoices(
+            { name: 'Tamamlandı', value: 'FINISHED' },
+            { name: 'Canlı', value: 'ONGOING' },
+            { name: 'Yaklaşan', value: 'UPCOMING' }
+        )),
+    new SlashCommandBuilder().setName('fikstur').setDescription('Yaklaşan turnuva maçlarını listeler'),
+    new SlashCommandBuilder().setName('profil').setDescription('Oyuncu profil kartını görüntüler')
+        .addUserOption(opt => opt.setName('kullanici').setDescription('Profiline bakılacak kişi (Boş bırakırsan kendin)')),
+    new SlashCommandBuilder().setName('duyuru').setDescription('[Staff] Gelişmiş duyuru ve bildirim sistemi')
+        .addStringOption(opt => opt.setName('renk').setDescription('Embed kenar rengi (Örn: #ff1a1a)').setRequired(false))
+        .addStringOption(opt => opt.setName('gorsel').setDescription('Duyuruya eklenecek görsel (Resim URL)').setRequired(false))
+        .addStringOption(opt => opt.setName('ping').setDescription('Bildirim türü (Everyone/Here)').addChoices(
+            { name: 'None', value: 'none' },
+            { name: 'Everyone', value: 'everyone' },
+            { name: 'Here', value: 'here' }
+        ).setRequired(false)),
+    new SlashCommandBuilder().setName('profil').setDescription('Oyuncu profil kartını görüntüler')
+        .addUserOption(opt => opt.setName('kullanici').setDescription('Profiline bakılacak kişi (Boş bırakırsan kendin)')),
+    
     // Rol Yönetimi
     new SlashCommandBuilder().setName('autorol_ayarla').setDescription('[Admin] Sunucuya yeni girenlere verilecek rolü ayarlar')
         .addRoleOption(opt => opt.setName('rol').setDescription('Verilecek rol (Boş bırakırsanız sistem kapanır)').setRequired(false)),
@@ -483,6 +507,78 @@ async function executeCommand(cmdName, ctx) {
             await ctx.editReply(`❌ HATA: Bitmeyen bir işlem oluştu veya yetkim yetmedi: ${e.message}`);
         }
     }
+    // MAÇ VE SKOR YÖNETİMİ
+    else if (cmdName === 'turnuva_skor_gir') {
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return ctx.reply({ content: 'Yetkin yok!' });
+        
+        await ctx.deferReply();
+        const macId = interaction.options.getString('mac_id');
+        const sBiz = interaction.options.getInteger('skor_biz');
+        const sRakip = interaction.options.getInteger('skor_rakip');
+        const durum = interaction.options.getString('durum') || 'FINISHED';
+
+        try {
+            const res = await axios.post(`${SITE_API}?action=update_match_score`, {
+                id: macId,
+                our_score: sBiz,
+                opp_score: sRakip,
+                status: durum
+            });
+
+            if (res.data.status === 'success') {
+                const embed = new EmbedBuilder()
+                    .setColor('#f1c40f')
+                    .setTitle('🏆 Maç Skoru Güncellendi')
+                    .setDescription(`**Maç ID:** ${macId}\n**Sonuç:** TEAM DOOM **${sBiz} - ${sRakip}** Rakip\n**Durum:** ${durum}`)
+                    .setFooter({ text: 'Veriler web sitesi ile senkronize edildi.' });
+                await ctx.editReply({ embeds: [embed] });
+            } else {
+                await ctx.editReply(`❌ Hata: ${res.data.message}`);
+            }
+        } catch(e) { await ctx.editReply(`API Bağlantı Hatası: ${e.message}`); }
+    }
+    else if (cmdName === 'fikstur') {
+        await ctx.deferReply();
+        try {
+            const res = await axios.get(`${SITE_API}?action=public_data`);
+            const upcomingMatches = res.data.matches.filter(m => m.status === 'UPCOMING').slice(0, 5);
+            
+            if (upcomingMatches.length === 0) return ctx.editReply('Yakın zamanda planlanmış mac bulunamadı.');
+
+            const embed = new EmbedBuilder()
+                .setColor('#3498db')
+                .setTitle('📅 Yaklaşan Maç Fikstürü')
+                .setDescription(upcomingMatches.map(m => `**${m.date} ${m.time}**\n🆚 vs ${m.opponent}\n🏆 ${m.tournament}`).join('\n\n'))
+                .setFooter({ text: 'TEAM DOOM SK' });
+            await ctx.editReply({ embeds: [embed] });
+        } catch(e) { await ctx.editReply('Veriler alınırken hata oluştu.'); }
+    }
+    else if (cmdName === 'profil') {
+        await ctx.deferReply();
+        const targetUser = interaction.options.getUser('kullanici') || user;
+        
+        try {
+            const res = await axios.get(`${SITE_API}?action=get_player_profile&discord_id=${targetUser.id}`);
+            if (res.data.status === 'success') {
+                const p = res.data.player;
+                const embed = new EmbedBuilder()
+                    .setColor('#e74c3c')
+                    .setAuthor({ name: `${p.nick} [${p.game_name || 'Multi'}]`, iconURL: targetUser.displayAvatarURL() })
+                    .setTitle(`${p.team_name} - ${p.role}`)
+                    .setThumbnail(p.img ? p.img : 'https://i.imgur.com/8Q9S8Xz.png')
+                    .addFields(
+                        { name: '🏆 Rank', value: p.rank || 'N/A', inline: true },
+                        { name: '📊 Kariyer KDA', value: p.kda || 'N/A', inline: true },
+                        { name: '📅 Katılım', value: p.joined_at || 'Bilinmiyor', inline: true }
+                    )
+                    .setDescription(p.description || 'Henüz bir açıklama eklenmemiş.')
+                    .setFooter({ text: 'TEAM DOOM SK Resmi Oyuncu Kartı' });
+                await ctx.editReply({ embeds: [embed] });
+            } else {
+                await ctx.editReply({ content: `🔍 <@${targetUser.id}> için kayıtlı bir oyuncu profili bulunamadı.`, ephemeral: true });
+            }
+        } catch(e) { await ctx.editReply('Profil bilgisi alınamadı.'); }
+    }
     // API ENTEGRASYONLU SİTE KOMUTLARI
     else if (cmdName === 'kadro') {
         await ctx.deferReply();
@@ -571,11 +667,58 @@ async function executeCommand(cmdName, ctx) {
             await ctx.editReply({ embeds: [embed] });
         } catch(e) { await ctx.editReply('Sunucu hatası.'); }
     }
+
+}
+
+// ── CANLI YAYIN TAKİP SİSTEMİ ──────────────────────────────────────────
+async function checkStreams() {
+    try {
+        const guild = client.guilds.cache.get(process.env.GUILD_ID);
+        if (!guild) return;
+
+        const streamerRole = guild.roles.cache.find(r => r.name.toLowerCase().includes('yayıncı'));
+        const members = await guild.members.fetch({ withPresences: true });
+        
+        // Sadece Yayıncı rolü olan ve Yayın yapanları filtrele
+        const liveMembers = members.filter(m => 
+            (streamerRole ? m.roles.cache.has(streamerRole.id) : true) && 
+            m.presence?.activities.some(a => a.type === ActivityType.Streaming)
+        );
+
+        for (const [id, member] of liveMembers) {
+            const stream = member.presence.activities.find(a => a.type === ActivityType.Streaming);
+            if (!db.lastStreamNotify) db.lastStreamNotify = {};
+            
+            const streamKey = `${id}_${stream.details || 'live'}`;
+            if (db.lastStreamNotify[id] !== streamKey) {
+                const notifyChannel = guild.channels.cache.find(c => c.name.toLowerCase().includes('canli-yayin'));
+                if (notifyChannel) {
+                    const embed = new EmbedBuilder()
+                        .setColor('#6441a5')
+                        .setTitle(`🟣 ${member.displayName} CANLI YAYINDA!`)
+                        .setDescription(`**Başlık:** ${stream.details || 'E-Spor Yayını'}\n**Platform:** ${stream.name}\n\n[Yayını İzlemek İçin Tıkla](${stream.url})`)
+                        .setThumbnail(member.user.displayAvatarURL())
+                        .setImage('https://i.imgur.com/x9n8p8x.png')
+                        .setFooter({ text: 'TEAM DOOM | Stream Tracker' });
+
+                    await notifyChannel.send({ content: `@everyone **${member.displayName}** şu an canlı yayında! 🚀`, embeds: [embed] });
+                    db.lastStreamNotify[id] = streamKey;
+                    saveDb();
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Stream check error:', e.message);
+    }
 }
 
 // ── BOT HAZIR OLDUĞUNDA ───────────────────────────────────────────────────────
 client.once('ready', async () => {
     console.log(`✅ MEGA BOT AKTİF: ${client.user.tag}`);
+    // Stream check interval
+    setInterval(checkStreams, 300000); // 5 dakikada bir kontrol
+    checkStreams(); // Initial check on startup
+
     const statuses = [
         { text: '/yardim veya doomYARDIM', type: ActivityType.Watching },
         { text: 'teamdoomsk.com', type: ActivityType.Playing },
@@ -774,83 +917,101 @@ client.on('interactionCreate', async interaction => {
         const subject = interaction.fields.getTextInputValue('ticket_subject');
         const desc = interaction.fields.getTextInputValue('ticket_desc');
         db.tickets++;
-        saveDb();
-        const category = interaction.guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('ticket'));
-        try {
-            const tCh = await interaction.guild.channels.create({
-                name: `ticket-${db.tickets}`, type: ChannelType.GuildText, parent: category?.id,
-                permissionOverwrites: [
-                    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-                    { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-                ]
-            });
-            const embed = new EmbedBuilder().setColor('#5865F2').setTitle(`🎫 Bilet #${db.tickets} - ${subject}`).setDescription(`**Kullanıcı:** ${interaction.user}\n**Kayıt:**\n${desc}`);
-            const btnRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Kapat').setStyle(ButtonStyle.Danger));
-            await tCh.send({ embeds: [embed], components: [btnRow] });
-            await interaction.reply({ content: `✅ ${tCh} oluşturuldu.`, ephemeral: true });
-        } catch(e) { await interaction.reply({ content:`Hata: ${e.message}`, ephemeral: true }); }
-        return;
-    }
+        if (mType === 'duyuru') {
+            const [,,ping, color, image] = interaction.customId.split('_');
+            const baslik = interaction.fields.getTextInputValue('duyuru_baslik');
+            const mesaj = interaction.fields.getTextInputValue('duyuru_mesaj');
 
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('private_modal_')) {
-        const type = interaction.customId.split('_').pop();
-        const name = interaction.fields.getTextInputValue('p_name');
-        const friendsStr = interaction.fields.getTextInputValue('p_friends') || '';
-        
-        await interaction.deferReply({ ephemeral: true });
+            const channel = interaction.guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
+            if (!channel) return interaction.reply({ content: '❌ Duyuru kanalı bulunamadı.', ephemeral: true });
 
-        try {
-            const guild = interaction.guild;
-            const ownerId = guild.ownerId;
-            const coordRole = guild.roles.cache.find(r => r.name.toLowerCase().includes('genel koordinatör'));
-            
-            const overwrites = [
-                { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.CreateInstantInvite] },
-                { id: ownerId, allow: [PermissionsBitField.Flags.ViewChannel] }
-            ];
-            if (coordRole) overwrites.push({ id: coordRole.id, allow: [PermissionsBitField.Flags.ViewChannel] });
-
-            // Arkadaşları ekle
-            const memberIds = friendsStr.match(/\d{17,19}/g) || [];
-            for (const id of memberIds) {
-                overwrites.push({ id, allow: [PermissionsBitField.Flags.ViewChannel] });
-            }
-
-            const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('özel'));
-            
-            const channel = await guild.channels.create({
-                name: `🔒-${name}`,
-                type: type === 'text' ? ChannelType.GuildText : ChannelType.GuildVoice,
-                parent: category?.id,
-                permissionOverwrites: overwrites
-            });
-
-            const invite = await channel.createInvite({ maxAge: 86400, maxUses: 5 }); // 24h link
-            
             const embed = new EmbedBuilder()
-                .setColor('#f1c40f')
-                .setTitle(`🏠 ${name} - Özel Alanın Hazır!`)
-                .setDescription(`Bu oda şu an sadece sana, davet ettiğin arkadaşlarına ve üst yönetime özeldir.\n\n**Erişim Bağlantısı (Dışarıdan davet için):**\n${invite.url}`)
-                .addFields({ name: '⚠️ Bilgi', value: 'İşin bittiğinde "Kanalı Kapat" butonuyla odayı silebilirsin.' })
-                .setFooter({ text: 'DOOM GUARD' });
+                .setTitle(`📢 ${baslik}`)
+                .setDescription(mesaj)
+                .setColor(color.startsWith('#') ? color : '#ff1a1a')
+                .setThumbnail(interaction.guild.iconURL())
+                .setTimestamp()
+                .setFooter({ text: 'TEAM DOOM SK | Resmi Duyuru', iconURL: interaction.guild.iconURL() });
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('ozel_kanal_kapat').setLabel('Kanalı Kapat ve Sil').setStyle(ButtonStyle.Danger).setEmoji('🗑️')
-            );
+            if (image && image !== 'none') embed.setImage(image);
 
-            if (type === 'text') {
-                await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
-            } else {
-                // Ses kanalıysa özel bir karşılama mesajı atamayız (text kısmına atabiliriz ama o ayrı)
-                // Şimdilik interaction reply ile iletelim
+            let content = '';
+            if (ping === 'everyone') content = '@everyone';
+            else if (ping === 'here') content = '@here';
+
+            await channel.send({ content, embeds: [embed] });
+            await interaction.reply({ content: `✅ Duyuru başarıyla gönderildi: ${channel}`, ephemeral: true });
+        }
+        else if (mType === 'private') {
+            const type = interaction.customId.split('_').pop();
+            const name = interaction.fields.getTextInputValue('p_name');
+            const friendsStr = interaction.fields.getTextInputValue('p_friends') || '';
+            
+            await interaction.deferReply({ ephemeral: true });
+
+            try {
+                const guild = interaction.guild;
+                const ownerId = guild.ownerId;
+                const coordRole = guild.roles.cache.find(r => r.name.toLowerCase().includes('genel koordinatör'));
+                
+                const overwrites = [
+                    { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.CreateInstantInvite] },
+                    { id: ownerId, allow: [PermissionsBitField.Flags.ViewChannel] }
+                ];
+                if (coordRole) overwrites.push({ id: coordRole.id, allow: [PermissionsBitField.Flags.ViewChannel] });
+
+                const memberIds = friendsStr.match(/\d{17,19}/g) || [];
+                for (const id of memberIds) {
+                    overwrites.push({ id, allow: [PermissionsBitField.Flags.ViewChannel] });
+                }
+
+                const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('özel'));
+                const channel = await guild.channels.create({
+                    name: `🔒-${name}`,
+                    type: type === 'text' ? ChannelType.GuildText : ChannelType.GuildVoice,
+                    parent: category?.id,
+                    permissionOverwrites: overwrites
+                });
+
+                const invite = await channel.createInvite({ maxAge: 86400, maxUses: 5 });
+                const embed = new EmbedBuilder()
+                    .setColor('#f1c40f')
+                    .setTitle(`🏠 ${name} - Özel Alanın Hazır!`)
+                    .setDescription(`Bu oda şu an sadece sana, davet ettiğin arkadaşlarına ve üst yönetime özeldir.\n\n**Erişim Bağlantısı:**\n${invite.url}`)
+                    .addFields({ name: '⚠️ Bilgi', value: 'İşin bittiğinde "Kanalı Kapat" butonuyla odayı silebilirsin.' })
+                    .setFooter({ text: 'DOOM GUARD' });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('ozel_kanal_kapat').setLabel('Kanalı Kapat ve Sil').setStyle(ButtonStyle.Danger).setEmoji('🗑️')
+                );
+
+                if (type === 'text') await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
+                await interaction.editReply({ content: `✅ Özel kanalın oluşturuldu: ${channel}\n🔗 **Davet Linki:** ${invite.url}` });
+            } catch(e) {
+                await interaction.editReply({ content: `❌ Kanal oluşturulurken hata: ${e.message}` });
             }
-
-            await interaction.editReply({ content: `✅ Özel ${type === 'text' ? 'metin' : 'ses'} kanalın oluşturuldu: ${channel}\n🔗 **Davet Linki:** ${invite.url}` });
-
-        } catch(e) {
-            await interaction.editReply({ content: `❌ Kanal oluşturulurken hata: ${e.message}` });
+        }
+        else if (mType === 'ticket') {
+            const subject = interaction.fields.getTextInputValue('t_subject');
+            const desc = interaction.fields.getTextInputValue('t_desc');
+            db.tickets++;
+            saveDb();
+            const category = interaction.guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('ticket'));
+            try {
+                const tCh = await interaction.guild.channels.create({
+                    name: `ticket-${db.tickets}`, type: ChannelType.GuildText, parent: category?.id,
+                    permissionOverwrites: [
+                        { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+                        { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+                    ]
+                });
+                const embed = new EmbedBuilder().setColor('#5865F2').setTitle(`🎫 Bilet #${db.tickets} - ${subject}`).setDescription(`**Kullanıcı:** ${interaction.user}\n**Kayıt:**\n${desc}`);
+                const btnRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Kapat').setStyle(ButtonStyle.Danger));
+                await tCh.send({ embeds: [embed], components: [btnRow] });
+                await interaction.reply({ content: `✅ ${tCh} oluşturuldu.`, ephemeral: true });
+            } catch(e) { await interaction.reply({ content:`Hata: ${e.message}`, ephemeral: true }); }
         }
         return;
     }
