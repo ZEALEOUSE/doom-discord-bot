@@ -64,7 +64,16 @@ const commands = [
     new SlashCommandBuilder().setName('ban').setDescription('[Admin] Kullanıcıyı sunucudan yasaklar')
         .addUserOption(opt => opt.setName('kullanici').setDescription('Banlanacak kişi').setRequired(true))
         .addStringOption(opt => opt.setName('sebep').setDescription('Ban sebebi')),
-    new SlashCommandBuilder().setName('oda_kur').setDescription('[Admin] Oto-Oda sistemini kurar')
+    new SlashCommandBuilder().setName('oda_kur').setDescription('[Admin] Oto-Oda sistemini kurar'),
+    new SlashCommandBuilder().setName('ozel_kanal_kur').setDescription('[Admin] Özel kanal (Text/Voice) oluşturma panelini kurar'),
+    
+    // Rol Yönetimi
+    new SlashCommandBuilder().setName('autorol_ayarla').setDescription('[Admin] Sunucuya yeni girenlere verilecek rolü ayarlar')
+        .addRoleOption(opt => opt.setName('rol').setDescription('Verilecek rol (Boş bırakırsanız sistem kapanır)').setRequired(false)),
+    new SlashCommandBuilder().setName('rol_herkese_ver').setDescription('[Admin] Sunucudaki TÜM ÜYELERE bir rol ekler')
+        .addRoleOption(opt => opt.setName('rol').setDescription('Eklenecek rol').setRequired(true)),
+    new SlashCommandBuilder().setName('rol_herkesten_al').setDescription('[Admin] Sunucudaki TÜM ÜYELERDEN bir rolü kaldırır')
+        .addRoleOption(opt => opt.setName('rol').setDescription('Kaldırılacak rol').setRequired(true))
 ];
 
 // ── ORTAK KOMUT MİMARİSİ (PREFIX + SLASH) ──────────────────────────────
@@ -130,6 +139,7 @@ async function executeCommand(cmdName, ctx) {
                 { name: '📊 **Ekonomi & Seviye**', value: '`profil`, `siralamalar`' },
                 { name: '🎫 **Destek/Ticket**', value: 'Destek kanallarındaki butonları kullanın.' },
                 { name: '⭐ **Moderasyon**', value: '`ticket_kur`, `oda_kur`, `temizle`, `kick`, `ban`' },
+                { name: '📜 **Rol Yönetimi**', value: '`/autorol_ayarla`, `/rol_herkese_ver`, `/rol_herkesten_al`' },
                 { name: '💡 **Kullanım Notu**', value: 'Bu komutları ister **/** ile (örn: `/profil`), isterseniz de **doom** başlığıyla kullanabilirsiniz (örn: `doomprofil`).' }
             )
             .setFooter({ text: 'DOOM GUARD • teamdoomsk.com' })
@@ -244,6 +254,95 @@ async function executeCommand(cmdName, ctx) {
         } catch (e) {
             await ctx.editReply('Hata: ' + e.message);
         }
+    }
+    else if (cmdName === 'ozel_kanal_kur') {
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageChannels)) return ctx.reply({ content: 'Yetkin yok!' });
+        const embed = new EmbedBuilder()
+            .setColor('#9b59b6')
+            .setTitle('🔒 Özel Alan Oluştur')
+            .setDescription('Kendine özel, sadece senin, davet ettiğin arkadaşların ve üst yönetimin görebileceği bir oda oluşturabilirsin.\n\n**Seçenekler:**\n💬 **Özel Metin Kanalı:** Yazışmalar için.\n🔊 **Özel Ses Kanalı:** Sohbet için.')
+            .setFooter({ text: 'DOOM GUARD Gizli Alan Sistemi' });
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('create_private_text').setLabel('Metin Kanalı').setStyle(ButtonStyle.Primary).setEmoji('💬'),
+            new ButtonBuilder().setCustomId('create_private_voice').setLabel('Ses Kanalı').setStyle(ButtonStyle.Success).setEmoji('🔊')
+        );
+        await ctx.channel.send({ embeds: [embed], components: [row] });
+        if(ctx.isSlash) await ctx.reply({ content: '✅ Özel kanal paneli kuruldu.', ephemeral: true });
+    }
+    // ROL YÖNETİMİ
+    else if (cmdName === 'autorol_ayarla') {
+        if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) return ctx.reply({ content: 'Yetkin yok! (Yönetici yetkisi lazım)' });
+        
+        let roleId = null;
+        if (ctx.isSlash) {
+            roleId = interaction.options.getRole('rol')?.id;
+        } else {
+            const mentionedRole = ctx.m.mentions.roles.first();
+            roleId = mentionedRole ? mentionedRole.id : null;
+        }
+
+        db.autoRoleId = roleId;
+        saveDb();
+
+        if (roleId) {
+            await ctx.reply(`✅ **Oto-Rol Aktif:** Sunucuya yeni katılanlara <@&${roleId}> rolü otomatik verilecek.`);
+        } else {
+            await ctx.reply(`❌ **Oto-Rol Kapatıldı:** Artık yeni girenlere otomatik rol verilmeyecek.`);
+        }
+    }
+    else if (cmdName === 'rol_herkese_ver') {
+        if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) return ctx.reply({ content: 'Yetkin yok! (Yönetici yetkisi lazım)' });
+        
+        let role = null;
+        if (ctx.isSlash) role = interaction.options.getRole('rol');
+        else role = ctx.m.mentions.roles.first();
+
+        if (!role) return ctx.reply('Lütfen bir rol belirtin.');
+        
+        await ctx.deferReply();
+        try {
+            const members = await guild.members.fetch();
+            const membersToUpdate = members.filter(m => !m.user.bot && !m.roles.cache.has(role.id));
+            
+            await ctx.editReply(`🚀 **İşlem Başladı:** ${membersToUpdate.size} kişiye <@&${role.id}> rolü veriliyor...`);
+            
+            let count = 0;
+            for (const [id, m] of membersToUpdate) {
+                try {
+                    await m.roles.add(role);
+                    count++;
+                    if (count % 10 === 0) await ctx.editReply(`🔄 Devam ediyor: **${count}/${membersToUpdate.size}** kişi tamamlandı.`);
+                } catch(e) {}
+            }
+            await ctx.editReply(`✅ **İşlem Tamamlandı:** Toplam **${count}** kişiye <@&${role.id}> rolü verildi.`);
+        } catch(e) { await ctx.editReply(`Hata: ${e.message}`); }
+    }
+    else if (cmdName === 'rol_herkesten_al') {
+        if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) return ctx.reply({ content: 'Yetkin yok! (Yönetici yetkisi lazım)' });
+        
+        let role = null;
+        if (ctx.isSlash) role = interaction.options.getRole('rol');
+        else role = ctx.m.mentions.roles.first();
+
+        if (!role) return ctx.reply('Lütfen bir rol belirtin.');
+
+        await ctx.deferReply();
+        try {
+            const members = await guild.members.fetch();
+            const membersToUpdate = members.filter(m => !m.user.bot && m.roles.cache.has(role.id));
+            
+            await ctx.editReply(`🚀 **İşlem Başladı:** ${membersToUpdate.size} kişiden <@&${role.id}> rolü alınıyor...`);
+            
+            let count = 0;
+            for (const [id, m] of membersToUpdate) {
+                try {
+                    await m.roles.remove(role);
+                    count++;
+                    if (count % 10 === 0) await ctx.editReply(`🔄 Devam ediyor: **${count}/${membersToUpdate.size}** kişi tamamlandı.`);
+                } catch(e) {}
+            }
+            await ctx.editReply(`✅ **İşlem Tamamlandı:** Toplam **${count}** kişiden <@&${role.id}> rolü alındı.`);
+        } catch(e) { await ctx.editReply(`Hata: ${e.message}`); }
     }
     // API ENTEGRASYONLU SİTE KOMUTLARI
     else if (cmdName === 'kadro') {
@@ -429,6 +528,17 @@ client.on('interactionCreate', async interaction => {
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_reason').setLabel('Neden TEAM DOOM SK?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Neden bize katılmak istiyorsun?'))
             );
             await interaction.showModal(modal);
+        } else if (interaction.customId.startsWith('create_private_')) {
+            const type = interaction.customId.split('_').pop(); // text or voice
+            const modal = new ModalBuilder().setCustomId(`private_modal_${type}`).setTitle(`Özel ${type === 'text' ? 'Metin' : 'Ses'} Kanalı`);
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('p_name').setLabel('Kanal Adı').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Dostlar Meclisi')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('p_friends').setLabel('Davetliler (Etiketle veya ID yaz)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Örn: @Samet @Ahmet veya IDler'))
+            );
+            await interaction.showModal(modal);
+        } else if (interaction.customId === 'ozel_kanal_kapat') {
+            await interaction.reply('🔒 Bu oda 5 saniye içinde imha edilecek...');
+            setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
         }
         return;
     }
@@ -544,6 +654,68 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('private_modal_')) {
+        const type = interaction.customId.split('_').pop();
+        const name = interaction.fields.getTextInputValue('p_name');
+        const friendsStr = interaction.fields.getTextInputValue('p_friends') || '';
+        
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            const guild = interaction.guild;
+            const ownerId = guild.ownerId;
+            const coordRole = guild.roles.cache.find(r => r.name.toLowerCase().includes('genel koordinatör'));
+            
+            const overwrites = [
+                { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.CreateInstantInvite] },
+                { id: ownerId, allow: [PermissionsBitField.Flags.ViewChannel] }
+            ];
+            if (coordRole) overwrites.push({ id: coordRole.id, allow: [PermissionsBitField.Flags.ViewChannel] });
+
+            // Arkadaşları ekle
+            const memberIds = friendsStr.match(/\d{17,19}/g) || [];
+            for (const id of memberIds) {
+                overwrites.push({ id, allow: [PermissionsBitField.Flags.ViewChannel] });
+            }
+
+            const category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('özel'));
+            
+            const channel = await guild.channels.create({
+                name: `🔒-${name}`,
+                type: type === 'text' ? ChannelType.GuildText : ChannelType.GuildVoice,
+                parent: category?.id,
+                permissionOverwrites: overwrites
+            });
+
+            const invite = await channel.createInvite({ maxAge: 86400, maxUses: 5 }); // 24h link
+            
+            const embed = new EmbedBuilder()
+                .setColor('#f1c40f')
+                .setTitle(`🏠 ${name} - Özel Alanın Hazır!`)
+                .setDescription(`Bu oda şu an sadece sana, davet ettiğin arkadaşlarına ve üst yönetime özeldir.\n\n**Erişim Bağlantısı (Dışarıdan davet için):**\n${invite.url}`)
+                .addFields({ name: '⚠️ Bilgi', value: 'İşin bittiğinde "Kanalı Kapat" butonuyla odayı silebilirsin.' })
+                .setFooter({ text: 'DOOM GUARD' });
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('ozel_kanal_kapat').setLabel('Kanalı Kapat ve Sil').setStyle(ButtonStyle.Danger).setEmoji('🗑️')
+            );
+
+            if (type === 'text') {
+                await channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
+            } else {
+                // Ses kanalıysa özel bir karşılama mesajı atamayız (text kısmına atabiliriz ama o ayrı)
+                // Şimdilik interaction reply ile iletelim
+            }
+
+            await interaction.editReply({ content: `✅ Özel ${type === 'text' ? 'metin' : 'ses'} kanalın oluşturuldu: ${channel}\n🔗 **Davet Linki:** ${invite.url}` });
+
+        } catch(e) {
+            await interaction.editReply({ content: `❌ Kanal oluşturulurken hata: ${e.message}` });
+        }
+        return;
+    }
+
     // SLASH KOMUT ROUTER'I
     if (interaction.isChatInputCommand()) {
         await executeCommand(interaction.commandName, new CmdCtx(interaction, null, null));
@@ -581,7 +753,15 @@ client.on('messageUpdate', (oldMsg, newMsg) => {
     if (oldMsg.author?.bot || oldMsg.content === newMsg.content) return;
     sendLog(oldMsg.guild, { color: '#f1c40f', title: '📝 Mesaj Düzenlendi', desc: `**${oldMsg.author}** in ${oldMsg.channel}\n**Eski:** ${oldMsg.content}\n**Yeni:** ${newMsg.content}` });
 });
-client.on('guildMemberAdd', member => {
+client.on('guildMemberAdd', async member => {
+    // Oto-Rol Sistemi
+    if (db.autoRoleId) {
+        try {
+            const role = member.guild.roles.cache.get(db.autoRoleId);
+            if (role) await member.roles.add(role);
+        } catch(e) { console.error('Oto-rol hatası:', e); }
+    }
+
     const ch = member.guild.systemChannel || member.guild.channels.cache.find(c => c.name.includes('hoş') || c.name.includes('welcome'));
     if (ch) ch.send({ content: `⚔️ **TEAM DOOM SK Ailesine Katıldı!**\nHoş geldin <@${member.user.id}>!` }).catch(()=>{});
     sendLog(member.guild, { color: '#2ecc71', title: '📥 Üye Katıldı', desc: `${member.user.tag} katıldı.` });
