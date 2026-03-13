@@ -3,7 +3,7 @@ const {
     Client, GatewayIntentBits, EmbedBuilder, REST, Routes,
     SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
     ModalBuilder, TextInputBuilder, TextInputStyle, ActivityType,
-    ChannelType, PermissionsBitField
+    ChannelType, PermissionsBitField, StringSelectMenuBuilder, StringSelectMenuOptionBuilder
 } = require('discord.js');
 const express = require('express');
 const axios = require('axios');
@@ -408,59 +408,115 @@ client.on('interactionCreate', async interaction => {
             await interaction.reply('Kanal 5 saniye içinde kapatılıyor...');
             setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
         } else if (interaction.customId === 'scout_create') {
-            const modal = new ModalBuilder().setCustomId('scout_modal').setTitle('🎯 Scout Başvurusu');
+            const modal = new ModalBuilder().setCustomId('scout_modal_1').setTitle('Adım 1: Kişisel Bilgiler');
             modal.addComponents(
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_name_age').setLabel('Adınız Soyadınız ve Yaşınız').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Samet Karadağ - 20')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_branch_game_rank').setLabel('Branşınız, Oyun ve Rütbeniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: FPS - Valorant - Yücelik 2')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_role_hours').setLabel('Rolünüz ve Oynama Saatiniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: IGL - Günde 6 Saat')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_links').setLabel('Profil, Tracker ve Video Linkleri').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Varsa oynanış video veya tracker linkleri')),
-                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('scout_motivation').setLabel('Neden TEAM DOOM SK?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Takımımıza neden katılmak istiyorsunuz?'))
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_name').setLabel('Adınız Soyadınız').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Samet Karadağ')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_age').setLabel('Yaşınız').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: 20')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_nick').setLabel('Oyun İçi Nick (IGN)').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: DOOM_Kral')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_email').setLabel('E-Posta Adresiniz').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Örn: iletisim@email.com'))
+            );
+            await interaction.showModal(modal);
+        } else if (interaction.customId === 'scout_modal_2_open') {
+            const userCache = db.scoutCache?.[interaction.user.id];
+            if (!userCache) return interaction.reply({ content: '❌ Hata: Kayıp oturum. Lütfen yeniden başlayın.', ephemeral: true });
+
+            const modal = new ModalBuilder().setCustomId('scout_modal_2').setTitle(`Adım 4: ${userCache.game} Detayları`);
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_rank').setLabel('Mevcut Rütbeniz / Kümeniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Yücelik 2 / Master')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_role').setLabel('Oynadığınız Rol / Mevki').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: Entry Fragger / Support')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_hours').setLabel('Haftalık Oynama Saatiniz').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Örn: 40 Saat')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_links').setLabel('Profil, Tracker ve Video Linkleri').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Tracker.gg, Klipler vb.')),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('s_reason').setLabel('Neden TEAM DOOM SK?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Neden bize katılmak istiyorsun?'))
             );
             await interaction.showModal(modal);
         }
         return;
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === 'scout_modal') {
-        const nameAge = interaction.fields.getTextInputValue('scout_name_age');
-        const branchGameRank = interaction.fields.getTextInputValue('scout_branch_game_rank');
-        const roleHours = interaction.fields.getTextInputValue('scout_role_hours');
-        const links = interaction.fields.getTextInputValue('scout_links') || '';
-        const motivation = interaction.fields.getTextInputValue('scout_motivation');
-        
-        const ageMatch = nameAge.match(/\d+/);
-        const age = ageMatch ? parseInt(ageMatch[0]) : 0;
-        
-        // Parsing details from combined inputs
-        const gameDataParts = branchGameRank.split('-').map(s => s.trim());
-        const parsedGame = gameDataParts.length > 1 ? gameDataParts[1] : gameDataParts[0];
-        const parsedRank = gameDataParts.length > 2 ? gameDataParts[2] : (gameDataParts.length > 1 ? gameDataParts[1] : 'Belirtilmedi');
+    if (interaction.isStringSelectMenu()) {
+        if (interaction.customId === 'scout_branch_select') {
+            const branch = interaction.values[0];
+            db.scoutCache = db.scoutCache || {};
+            if (!db.scoutCache[interaction.user.id]) return interaction.reply({ content: 'Oturum zaman aşımına uğradı.', ephemeral: true });
+            
+            db.scoutCache[interaction.user.id].branch = branch;
 
-        const roleDataParts = roleHours.split('-').map(s => s.trim());
-        const parsedRole = roleDataParts[0];
-        const parsedHours = roleDataParts.length > 1 ? roleDataParts[1] : '';
+            let games = [];
+            if (branch === 'FPS') games = ['Valorant', 'Counter Strike 2'];
+            if (branch === 'MOBA') games = ['League of Legends (PC)', 'League of Legends: Wild Rift', 'Mobile Legends'];
+            if (branch === 'BATTLEROYALE') games = ['PUBG Mobile', 'PUBG: BATTLEGROUNDS'];
+
+            const select = new StringSelectMenuBuilder().setCustomId('scout_game_select').setPlaceholder('Oyununuzu Seçin');
+            games.forEach(g => select.addOptions(new StringSelectMenuOptionBuilder().setLabel(g).setValue(g)));
+            const row = new ActionRowBuilder().addComponents(select);
+            await interaction.update({ content: `✅ Branş: **${branch}**\n▶️ **Adım 3:** Lütfen oyununuzu seçin:`, components: [row] });
+        } else if (interaction.customId === 'scout_game_select') {
+            const game = interaction.values[0];
+            if (db.scoutCache?.[interaction.user.id]) {
+                db.scoutCache[interaction.user.id].game = game;
+            } else return interaction.reply({ content: 'Oturum zaman aşımı.', ephemeral: true });
+            
+            const btnRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('scout_modal_2_open').setLabel(`${game} Detaylarını Doldur ve Bitir`).setStyle(ButtonStyle.Success).setEmoji('📝')
+            );
+            await interaction.update({ content: `✅ Seçilen Oyun: **${game}**\n▶️ **Son Adım:** Başvuruyu tamamlamak için aşağıdaki butona tıklayarak oyun bilgilerinizi girin.`, components: [btnRow] });
+        }
+        return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'scout_modal_1') {
+        db.scoutCache = db.scoutCache || {};
+        db.scoutCache[interaction.user.id] = {
+            name: interaction.fields.getTextInputValue('s_name'),
+            age: parseInt(interaction.fields.getTextInputValue('s_age').match(/\d+/)?.[0] || 0),
+            nick: interaction.fields.getTextInputValue('s_nick'),
+            email: interaction.fields.getTextInputValue('s_email') || ''
+        };
+
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('scout_branch_select')
+            .setPlaceholder('Branş Seçin')
+            .addOptions(
+                new StringSelectMenuOptionBuilder().setLabel('FPS').setValue('FPS').setEmoji('🎯'),
+                new StringSelectMenuOptionBuilder().setLabel('MOBA').setValue('MOBA').setEmoji('⚔️'),
+                new StringSelectMenuOptionBuilder().setLabel('BATTLE ROYALE').setValue('BATTLEROYALE').setEmoji('🪂')
+            );
+        const row = new ActionRowBuilder().addComponents(select);
+        await interaction.reply({ content: `✅ Bilgiler alındı Hoş geldin **${db.scoutCache[interaction.user.id].name}**!\n▶️ **Adım 2:** Şimdi başvuracağın branşı seç:`, components: [row], ephemeral: true });
+        return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'scout_modal_2') {
+        db.scoutCache = db.scoutCache || {};
+        const userCache = db.scoutCache[interaction.user.id];
+        if (!userCache) return interaction.reply({ content: '❌ Oturum zaman aşımı veya geçersiz data. Lütfen yeniden başlayın.', ephemeral: true });
 
         const payload = {
-            name: nameAge,
-            nick: interaction.user.tag,
-            age: age,
+            name: userCache.name,
+            nick: userCache.nick,
+            age: userCache.age,
             discord: interaction.user.id,
-            email: 'discord_basvuru',
-            game: parsedGame || 'Belirtilmedi',
-            rank: parsedRank || 'Belirtilmedi',
-            role: parsedRole || 'Belirtilmedi',
-            hours: parsedHours,
-            profile_link: links,
-            motivation: motivation,
-            notes: `Branş: ${gameDataParts[0] || '?'} | Discord'dan Başvuru`
+            email: userCache.email || 'discord_basvuru',
+            game: userCache.game || 'Belirtilmedi',
+            rank: interaction.fields.getTextInputValue('s_rank'),
+            role: interaction.fields.getTextInputValue('s_role'),
+            hours: interaction.fields.getTextInputValue('s_hours'),
+            profile_link: interaction.fields.getTextInputValue('s_links'),
+            motivation: interaction.fields.getTextInputValue('s_reason'),
+            notes: `Branş: ${userCache.branch || '?'} | Discord'dan Başvuru`
         };
 
         try {
             await axios.post(`${SITE_API}?action=scout_apply`, payload);
-            await interaction.reply({ content: '✅ Başvurunuz başarıyla yönetim paneline (Website) iletildi!\nDurumunuz değiştiğinde (Onaylandı/Reddedildi vb.) bot size DM gönderecektir.', ephemeral: true });
-            sendLog(interaction.guild, { color: '#00ccff', title: '📢 Yeni Scout Başvurusu (Discord)', desc: `**Aday:** ${interaction.user}\n**Ad:** ${nameAge}\n**Oyun/Rank:** ${gameRank}\n**Rol:** ${role}` });
+            await interaction.reply({ content: '🎉 **TEBRİKLER!** Başvurunuz başarıyla website yönetim paneline iletildi!\nDurumunuz değiştiğinde bot size DM gönderecektir.', ephemeral: true });
+            sendLog(interaction.guild, { 
+                color: '#00ccff', 
+                title: '📢 Yeni Scout Başvurusu', 
+                desc: `**Aday:** <@${interaction.user.id}>\n**Branş/Oyun:** ${userCache.branch} - ${userCache.game}\n**Adı:** ${userCache.name}\n**Mevki:** ${payload.role}\n**Rank:** ${payload.rank}` 
+            });
+            delete db.scoutCache[interaction.user.id];
         } catch(e) {
-            await interaction.reply({ content: `❌ Başvuru websitesine iletilemedi! Sunucu geçici olarak kapalı olabilir. (${e.message})`, ephemeral: true });
+            await interaction.reply({ content: `❌ Başvuru websitesine iletilemedi! (${e.message})`, ephemeral: true });
         }
         return;
     }
