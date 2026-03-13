@@ -26,6 +26,8 @@ const client = new Client({
 });
 
 const SITE_API = process.env.SITE_API_URL || 'https://teamdoomsk.com/admin/api.php';
+const SITE_URL = SITE_API.replace('/admin/api.php', '');
+
 
 // ── BASİT VERİTABANI (JSON TABANLI) ──────────────────────────────────────────
 const dbPath = path.join(__dirname, 'database.json');
@@ -667,6 +669,21 @@ async function executeCommand(cmdName, ctx) {
             await ctx.editReply({ embeds: [embed] });
         } catch(e) { await ctx.editReply('Sunucu hatası.'); }
     }
+    else if (cmdName === 'duyuru') {
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return ctx.reply({ content: 'Yetkin yok!' });
+        if (!ctx.isSlash) return ctx.reply({ content: 'Bu komut sadece Slash (/) olarak kullanılabilir.' });
+
+        const ping = ctx.getString('ping', 0) || 'none';
+        const renk = ctx.getString('renk', 1) || '#ff1a1a';
+        const gorsel = ctx.getString('gorsel', 2) || 'none';
+
+        const modal = new ModalBuilder().setCustomId(`duyuru_modal_${ping}_${renk}_${gorsel}`).setTitle('📢 Duyuru Hazırla');
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_baslik').setLabel('Duyuru Başlığı').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duyuru_mesaj').setLabel('Duyuru İçeriği').setStyle(TextInputStyle.Paragraph).setRequired(true))
+        );
+        await interaction.showModal(modal);
+    }
 
 }
 
@@ -731,11 +748,25 @@ client.once('ready', async () => {
         s = (s + 1) % statuses.length;
     }, 15000);
 
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(c => c.toJSON()) });
         console.log('✅ Global Slash komutları kaydedildi.');
     } catch (err) {}
+
+    // ── BOT STATUS HEARTBEAT ──────────────────────────────
+    async function updateBotStatus(status) {
+        try {
+            await axios.post(`${SITE_API}?action=update_bot_status`, { status });
+        } catch (e) {
+            console.error('Bot status update error:', e.message);
+        }
+    }
+
+    // Set online on startup
+    updateBotStatus('online');
+    
+    // Pulse every 60 seconds
+    setInterval(() => updateBotStatus('online'), 60000);
 });
 
 // ── PREFIX & XP (MESSAGE CREATE) ──────────────────────────────────────────────
@@ -913,16 +944,29 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === 'ticket_modal') {
-        const subject = interaction.fields.getTextInputValue('ticket_subject');
-        const desc = interaction.fields.getTextInputValue('ticket_desc');
-        db.tickets++;
-        if (mType === 'duyuru') {
-            const [,,ping, color, image] = interaction.customId.split('_');
+    if (interaction.isModalSubmit()) {
+        const customId = interaction.customId;
+
+        if (customId.startsWith('duyuru_modal_')) {
+            const [,,ping, color, image] = customId.split('_');
             const baslik = interaction.fields.getTextInputValue('duyuru_baslik');
             const mesaj = interaction.fields.getTextInputValue('duyuru_mesaj');
 
-            const channel = interaction.guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
+            let channel = null;
+            try {
+                const configRes = await axios.get(`${SITE_API}?action=get_discord_config`);
+                const newsChannelId = configRes.data?.config?.news_channel;
+                if (newsChannelId) {
+                    channel = await interaction.guild.channels.fetch(newsChannelId).catch(() => null);
+                }
+            } catch (e) {
+                console.error('Config fetch error:', e.message);
+            }
+
+            if (!channel) {
+                channel = interaction.guild.channels.cache.find(c => c.name.toLowerCase().includes('duyuru') || c.name.toLowerCase().includes('announcement'));
+            }
+
             if (!channel) return interaction.reply({ content: '❌ Duyuru kanalı bulunamadı.', ephemeral: true });
 
             const embed = new EmbedBuilder()
@@ -942,8 +986,8 @@ client.on('interactionCreate', async interaction => {
             await channel.send({ content, embeds: [embed] });
             await interaction.reply({ content: `✅ Duyuru başarıyla gönderildi: ${channel}`, ephemeral: true });
         }
-        else if (mType === 'private') {
-            const type = interaction.customId.split('_').pop();
+        else if (customId.startsWith('private_modal_')) {
+            const type = customId.split('_').pop();
             const name = interaction.fields.getTextInputValue('p_name');
             const friendsStr = interaction.fields.getTextInputValue('p_friends') || '';
             
@@ -992,9 +1036,9 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ content: `❌ Kanal oluşturulurken hata: ${e.message}` });
             }
         }
-        else if (mType === 'ticket') {
-            const subject = interaction.fields.getTextInputValue('t_subject');
-            const desc = interaction.fields.getTextInputValue('t_desc');
+        else if (customId === 'ticket_modal') {
+            const subject = interaction.fields.getTextInputValue('ticket_subject');
+            const desc = interaction.fields.getTextInputValue('ticket_desc');
             db.tickets++;
             saveDb();
             const category = interaction.guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase().includes('ticket'));
